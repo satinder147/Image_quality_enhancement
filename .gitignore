@@ -1,6 +1,6 @@
 /data
-50.pth
-road3.MODEL
+/potrait/models/
 *.jpg
 __pycache__/
 /bestshot/land.dat
+images/
