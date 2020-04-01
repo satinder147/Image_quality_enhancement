@@ -11,7 +11,7 @@ while True:
         saliency=cv2.saliency.MotionSaliencyBinWangApr2014_create()
         saliency.setImagesize(frame.shape[1],frame.shape[0])
         saliency.init()
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cv    print(i)tColor(frame, cv2.COLOR_BGR2GRAY)
     (success, saliencyMap) = saliency.computeSaliency(gray)
     saliencyMap = (saliencyMap * 255).astype("uint8")
     cv2.imshow("Map", saliencyMap)

@@ -4,8 +4,10 @@ from scipy.spatial import distance as dist
 import numpy as np
 
 class scoring:
+
+
     def __init__(self):
-        pass
+        self.blur_threshold=3000
 
     def d(self,p1,p2):
         x=(p1.x,p1.y)
@@ -40,70 +42,62 @@ class scoring:
         aspect=self.d(p1,p3)/self.d(p2,p4) #Aspect not changing much
         slope=(p1.y-p4.y)/(p1.x-p4.x) #slope can be used to predict if the person opened his/her mouth
         #But opened mouth is not always good. For a good smile teeth can be detected
-
         #cv2.line(frame,(p1.x,p1.y),(p4.x,p4.y),(255,0,0),2)
         #cv2.line(frame,(p1.x,p1.y),(p3.x,p3.y),(255,0,0),2)
         #cv2.line(frame,(p2.x,p2.y),(p4.x,p4.y),(255,0,0),2)
         #print("aspect: {} and slope {}".format(aspect,slope))
-        self.teeth_detection(frame,points)
-        return frame
+        teeth=self.teeth_detection(frame,points)
+        #print("slope",slope) >.32 smile
+        return frame,slope,teeth
     
     def saliency(self):
         pass
 
-    def blur(self):
-        pass
+    def blur(self,grey):
+        
+        '''
+        Calculates the variance of the result, 
+        after applying the laplacian kernal on 
+        the image.
+        '''
+        return cv2.Laplacian(grey,cv2.CV_64F).var()
+        
     
     def lighting(self):
         #considering lightning would not be a problem
         pass
    
-    def pose(self,frame,landmarks):
-        size=frame.shape
-        dist_coeffs = np.zeros((4,1))
-        image_points=[(landmarks.part(33).x,landmarks.part(33).y),
-        (landmarks.part(8).x,landmarks.part(8).y),
-        (landmarks.part(36).x,landmarks.part(36).y),
-        (landmarks.part(45).x,landmarks.part(45).y),
-        (landmarks.part(48).x,landmarks.part(48).y),
-        (landmarks.part(54).x,landmarks.part(54).y)]
-        image_points=np.array(image_points,dtype="double")
-        model_points = np.array([
-
-                            (0.0, 0.0, 0.0),            
-                            (0.0, -330.0, -65.0),       
-                            (-225.0, 170.0, -135.0),    
-                            (225.0, 170.0, -135.0),      
-                            (-150.0, -150.0, -125.0),   
-                            (150.0, -150.0, -125.0)     
-                   ])
-
-        focal_length = size[1]
-        center = (size[1]/2, size[0]/2)
-        camera_matrix = np.array([[focal_length, 0, center[0]],
-                                [0, focal_length, center[1]],
-                                [0, 0, 1]], dtype = "double")
-
-
-        (success, rotation_vector, translation_vector) = cv2.solvePnP(model_points, image_points, camera_matrix, dist_coeffs, flags=cv2.cv2.SOLVEPNP_ITERATIVE)
-        #pass
-        (nose_end_point2D, jacobian) = cv2.projectPoints(np.array([(0.0, 0.0, 1000.0)]), rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-        for p in image_points:
-            cv2.circle(frame, (int(p[0]), int(p[1])), 3, (0,0,255), -1)
-       
-        p1 = ( int(image_points[0][0]), int(image_points[0][1]))
-
-        p2 = ( int(nose_end_point2D[0][0][0]), int(nose_end_point2D[0][0][1]))
-        cv2.line(frame, p1, p2, (255,0,0), 2)
-        cv2.imshow("ds",frame)
-
-       
-       
-       
-       
-       
        #histogram equilization
-    
+    def score(self,frame,eye_points,smile_points):
+
+
+        #add condition when the person is not detected
+        photo_score=0
+        left_eye=self.eye_aspect(eye_points[0])
+        right_eye=self.eye_aspect(eye_points[1])
+
+        if(left_eye<=0.25 and right_eye <=0.25):
+            score=0
+        elif(left_eye>=0.25):
+            score+=100
+        elif(right_eye>=0.25):
+            score+=100
+        else:
+            score+=50
+        
+        _,slope,teeth=self.smile_aspect(frame,smile_points)
+        if(slope>0.32 and teeth):
+            score+=100
+        elif(slope>0.32):
+            score-=100
+        
+        #global blur score
+        blur_score=self.blur(frame)
+        if(blur_score<self.blur_threshold):
+            score=-100
+        #check if all the faces are in focus
+        
+
 
 def bb(rect):
     x=rect.left()
@@ -111,6 +105,8 @@ def bb(rect):
     w=rect.right()-x
     h=rect.bottom()-y
     return (x,y,w,h)
+
+
 obj=scoring()
 predictor=dlib.shape_predictor("land.dat")
 cap=cv2.VideoCapture(0)
@@ -151,9 +147,9 @@ while ret:
             #if i%2!=0:
             #cv2.putText(frame,str(i),(landmarks.part(i).x,landmarks.part(i).y),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,145,0),2)
         '''
-        #smilepoints=[landmarks.part(48),landmarks.part(51),landmarks.part(54),landmarks.part(57)]
-        #frame=obj.smile_aspect(frame,smilepoints)
-        obj.pose(frame,landmarks)
+        smilepoints=[landmarks.part(48),landmarks.part(51),landmarks.part(54),landmarks.part(57)]
+        frame=obj.smile_aspect(frame,smilepoints)
+        #obj.pose(frame,landmarks)
         x,y,w,h=bb(rects)
         
         cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)

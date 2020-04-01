@@ -4,3 +4,6 @@
 __pycache__/
 /bestshot/land.dat
 images/
+data.tar.gz
+50.pth
+

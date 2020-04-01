@@ -11,7 +11,12 @@ class potrait:
 
 
     def __init__(self):
-        self.model=load_model('models/deconv_bnoptimized_munet.h5')
+        self.model=load_model('potrait/models/deconv_bnoptimized_munet.h5')
+
+    def smooth(self,e1,e2,mask):
+        val=(mask-e1)/(e2-e1)
+        x=np.clip(val,0.0,1.0)
+        return x*x*(3-2*x)
 
     def getPotrait(self,img):
         h,w,_=img.shape
@@ -26,25 +31,36 @@ class potrait:
         mask=mask*255
         mask=mask.astype("uint8")
         t,mask=cv2.threshold(mask,128,255,cv2.THRESH_BINARY)
-        mask=cv2.resize(mask,(w,h))
-
-        mask=cv2.blur(mask,(5,5))
         mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, (5,5))
         mask=cv2.morphologyEx(mask, cv2.MORPH_CLOSE, (5,5))
+        mask=cv2.resize(mask,(w,h))
+        mask=cv2.GaussianBlur(mask,(7,7),1)
         mask_inv=cv2.bitwise_not(mask)
-
+        #cv2.imshow("dds",mask)
+        val=self.smooth(0.3,0.5,mask)
+        #cv2.imshow("ds",val)
+        
         blurred=frame.copy()
-        blurred=cv2.GaussianBlur(blurred,(5,5),0)
+        blurred=cv2.GaussianBlur(blurred,(19,19),1)
         background=cv2.bitwise_and(blurred,blurred,mask=mask_inv)
         foreground=cv2.bitwise_and(frame,frame,mask=mask)
-        result=cv2.bitwise_or(background,foreground)
+        val=val.reshape((h,w,1))
+        #result=cv2.bitwise_or(background,foreground)
+        #print(np.clip(val,0.0,1.0))
+        background=np.float32(background)/255.0
+        foreground=np.float32(foreground)/255.0
+        result=val*foreground+background*(1-val)
+        result=np.uint8(result*255.0)
         cv2.imwrite("result.jpg",result)
+        val=np.uint8(val*255)
+        cv2.imwrite("mask.jpg",val)
+        #cv2.waitKey(0)
 
         
 if __name__=="__main__":
     img=cv2.imread("../images/sh.jpg")
-    cv2.imshow("im",img)
-    cv2.waitKey(0)
+    #cv2.imshow("im",img)
+    #cv2.waitKey(0)
     obj=potrait()
     obj.getPotrait(img)
 
