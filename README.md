@@ -8,20 +8,18 @@ This is my Final year Project. This project is based on Computational Photograph
 ## TO DO
 - [x] Start the Project
 - [ ] Correcting the orientation of a image
-- [ ] HDR Imagery
 - [ ] Potrait Mode
 - [ ] Best shot
 
 # Best shot
-- [ ] Blur detection
+- [x] Blur detection
 - [x] Open eyes detection
-- [ ] smile scoring
+- [x] smile scoring
 - [ ] motion saliency detection
 - [ ] Check if importatnt region is in focus or not
 
 # Potrait mode
-- [ ] trained basic keras unet
-- [ ] Add image augmentation
-- [ ] Find problems with pytorch unet
-- [ ] Add image augmentation
-- [ ] Add resnet based encoder
+- [x] trained basic keras unet
+- [x] Find problems with pytorch unet
+- [x] Add image augmentation
+- [x] Add resnet based encoder
