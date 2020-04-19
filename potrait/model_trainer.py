@@ -11,7 +11,7 @@ sys.path.append('')
 import torch.nn as nn
 import torch.optim as optim
 from torchsummary import summary
-#from dataLoader.dataloader_unet import load
+from dataloader_unet import load
 #from dataLoader.dataloader_cnn import load_cnn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -24,7 +24,10 @@ parser.add_argument("--lr",default=0.0002)
 parser.add_argument("--model",default="unet",help="unet/cnn")
 args=parser.parse_args()
 
-
+print("number of epochs: ",args.epochs)
+print("batch size: ",args.batch_size)
+print("learning rate: ",args.lr)
+print("training ",args.model)
 
 
 def dice_loss(pred, target, smooth = 1.):
@@ -67,7 +70,7 @@ def weights_init(m):
         torch.nn.init.xavier_uniform_(m.weight)
         torch.nn.init.zeros_(m.bias)
 
-def init(*args,**kwargs):
+def init(**kwargs):
 
     """
     Initiates the training process
@@ -109,7 +112,7 @@ def init(*args,**kwargs):
     print("Total size of the dataset: ",size)
     print("Train data size: ",train_size)
     print("Test data size: ",test_size)
-    print("using {} for training",device)
+    print("using {} for training".format(device))
     train,validation=torch.utils.data.random_split(data,[train_size,test_size])
     train_loader=DataLoader(train,batch_size=batch_size,shuffle=True,num_workers=4)
     valid_loader=DataLoader(validation,batch_size=batch_size,shuffle=True,num_workers=4)
@@ -136,19 +139,20 @@ def validation(**kwargs):
     with torch.no_grad():
         for no,data in enumerate(valid_loader):
             imgs,masks=data[0].to(device),data[1].to(device)
-            num_img=imgs[0]
+            num_img=imgs.shape[0]
             outputs=net(imgs)
             v_loss=calc_loss(outputs,masks)
             if(model=='unet'):
                 valid_loss+=(torch.exp(v_loss).item())*(args.batch_size/num_img)
             #elif(model=='cnn'):
              #   valid_loss+=v_loss.item()  
+
             p+=1
     
     return valid_loss/p
 
 
-def training_loop(*args,**kwargs):
+def training_loop(**kwargs):
     """
     Main training Loop
     keyword parameters:
@@ -176,18 +180,23 @@ def training_loop(*args,**kwargs):
     yy=[]
     for epoch_num in range(1,epochs+1):
         running_loss=0.0
+        total_train=0
+        correct_train=0
         for i,samples in enumerate(train_loader):
             imgs,masks=samples[0],samples[1]
-            num_imgs=imgs[0]
+            num_imgs=imgs.shape[0]
             imgs,masks=imgs.to(device),masks.to(device)
             opt.zero_grad()
             outputs=net(imgs)
             loss=calc_loss(outputs,masks) #criterion(outputs,masks)
             loss.backward()
             opt.step()
-            running_loss+=(torch.exp(loss).item())*(args.batch_size/num_imgs)
+            _, predicted = torch.max(outputs.data, 1)
+            total_train += masks.nelement()
+            correct_train += predicted.eq(masks.data).sum().item()
+            running_loss+=(torch.exp(loss).item()) *(args.batch_size/num_imgs)
             valid_loss=0
-            if(i%num_iter==0):
+            if(i%num_iter==0 and i!=0):
                 valid_loss=validation(valid_loader=valid_loader,criterion=criterion)
                 writer.add_scalars("first",{'train_loss':torch.tensor(running_loss/num_iter),
                                             'validation_loss':torch.tensor(valid_loss)},epoch_num*len(train_loader)+i)
@@ -195,16 +204,21 @@ def training_loop(*args,**kwargs):
                 writer.close()
                 print("Epoch [%3d] iteration [%4d] loss:[%.10f]"%(epoch_num,i,running_loss/num_iter),end="")
                 print(" validation_loss:[%.10f]"%(valid_loss),end="")
-                print("sch [%.10f] opt [%.10f]"%(0.0,opt.param_groups[0]['lr']))
+                print("acc [%3d] current lr [%.10f]"%(correct_train/total_train,opt.param_groups[0]['lr']))
                 running_loss=0.0
+                correct_train=0
+                total_train=0
 
-            if i==160:
+            if i==10:
                 sch.step(valid_loss)
-
+        running_loss=0.0
+        correct_train=0
+        total_train=0
         if epoch_num%2==0:
 
             torch.save(net.state_dict(),"checkpoints/"+str(epoch_num)+".pth")
-        
+        	
+
     
 if __name__=="__main__":
     model=args.model
