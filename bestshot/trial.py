@@ -3,6 +3,12 @@ import dlib
 from scipy.spatial import distance as dist
 import numpy as np
 
+
+
+#head angle
+#scale of the face
+#more parameters
+#face occlusion
 class scoring:
 
 
@@ -25,14 +31,17 @@ class scoring:
         p1,p2,p3,p4=points
         roi=frame[p2.y:p4.y,p1.x:p3.x]
         gray=cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
+        lower_white = np.array([0,0,0], dtype=np.uint8)
+        upper_white = np.array([0,0,255], dtype=np.uint8)
         gray=cv2.Canny(gray,100,150)
-        #thresh,gray=cv2.threshold(gray,125,255,cv2.THRESH_BINARY)
+        #gray=cv2.inRange(gray,lower_white,upper_white)#cv2.threshold(gray,200,255,cv2.THRESH_BINARY)
         #gray=cv2.erode(gray,None,iterations=2)                          #try otsu thresholding
         #gray=cv2.dilate(gray,None,iterations=2)
-        cv2.imshow("ds",gray)
+        cv2.imshow("teeth",gray)
+        cv2.waitKey(1)
         con,hei=cv2.findContours(gray,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
         if(con):
-            cv2.drawContours(frame,con,-1,(0,255,0),2)
+            #cv2.drawContours(frame,con,-1,(0,255,0),2)
             return True
         
         return False
@@ -42,12 +51,12 @@ class scoring:
         aspect=self.d(p1,p3)/self.d(p2,p4) #Aspect not changing much
         slope=(p1.y-p4.y)/(p1.x-p4.x) #slope can be used to predict if the person opened his/her mouth
         #But opened mouth is not always good. For a good smile teeth can be detected
-        #cv2.line(frame,(p1.x,p1.y),(p4.x,p4.y),(255,0,0),2)
-        #cv2.line(frame,(p1.x,p1.y),(p3.x,p3.y),(255,0,0),2)
-        #cv2.line(frame,(p2.x,p2.y),(p4.x,p4.y),(255,0,0),2)
+        cv2.line(frame,(p1.x,p1.y),(p4.x,p4.y),(255,0,0),2)
+        cv2.line(frame,(p1.x,p1.y),(p3.x,p3.y),(255,0,0),2)
+        cv2.line(frame,(p2.x,p2.y),(p4.x,p4.y),(255,0,0),2)
         #print("aspect: {} and slope {}".format(aspect,slope))
         teeth=self.teeth_detection(frame,points)
-        #print("slope",slope) >.32 smile
+        print("slope",slope) #>.32 smile
         return frame,slope,teeth
     
     def saliency(self):
@@ -72,24 +81,38 @@ class scoring:
 
 
         #add condition when the person is not detected
-        photo_score=0
+        score=0
         left_eye=self.eye_aspect(eye_points[0])
         right_eye=self.eye_aspect(eye_points[1])
-
-        if(left_eye<=0.25 and right_eye <=0.25):
+        print(left_eye,right_eye)
+        eye_threshold=0.25
+        if(left_eye<=eye_threshold and right_eye <=eye_threshold):
             score=0
-        elif(left_eye>=0.25):
-            score+=100
-        elif(right_eye>=0.25):
-            score+=100
-        else:
+            frame=cv2.putText(frame,"eyes closed",(50,20),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("both eyes closed")
+        elif(left_eye>=eye_threshold and right_eye>=eye_threshold):
             score+=50
+            frame=cv2.putText(frame,"eyes open",(50,20),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("both eyes open")
+        elif(left_eye>=eye_threshold):
+            score+=100
+            frame=cv2.putText(frame,"left eye open",(50,20),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("left eye open")
+        elif(right_eye>=eye_threshold):
+            score+=100
+            frame=cv2.putText(frame,"right eye open",(50,20),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("right eye open")
+
         
         _,slope,teeth=self.smile_aspect(frame,smile_points)
         if(slope>0.32 and teeth):
             score+=100
+            frame=cv2.putText(frame,"smiling and mouth open",(50,40),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("mouth open and smiling")
         elif(slope>0.32):
             score-=100
+            frame=cv2.putText(frame,"mouth open but not smiling",(50,40),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
+            print("mouth open but not smiling")
         
         #global blur score
         blur_score=self.blur(frame)
@@ -107,54 +130,34 @@ def bb(rect):
     return (x,y,w,h)
 
 
-obj=scoring()
-predictor=dlib.shape_predictor("land.dat")
-cap=cv2.VideoCapture(0)
-ret=True
-detector=dlib.get_frontal_face_detector()
-while ret:
-    ret,frame=cap.read()
-    #frame=cv2.imread("../IMG_20200311_151935.jpg")
-    w,h,c=frame.shape
-    aspect=w/h
-    frame=cv2.resize(frame,(480,int(aspect*480)))
-    gray=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
 
-    rects=detector(gray,1)
-    for (i,rects) in enumerate(rects):
-        landmarks=predictor(gray,rects)
-        left_eye=gray[landmarks.part(37).y:landmarks.part(40).y,landmarks.part(36).x:landmarks.part(39).x]
-        right_eye=gray[landmarks.part(43).y:landmarks.part(46).y,landmarks.part(43).x:landmarks.part(45).x]
-        #eye(right_eye,"right")
-        lp=[]
-        rp=[]
-        for i in range(6):
-            lp.append(landmarks.part(36+i))
-            rp.append(landmarks.part(42+i))
-        #ear=(eye(lp)+eye(rp))/2.0
-        #print(ear)
-        #if(ear<0.25):
-        #    cv2.putText(frame,"close",(10,10),cv2.FONT_HERSHEY_SIMPLEX,0.5,(255,145,0),2)
-        #else:
-        #    cv2.putText(frame,"open",(10,10),cv2.FONT_HERSHEY_SIMPLEX,0.5,(255,145,0),2)
-        cv2.rectangle(frame,(landmarks.part(36).x,landmarks.part(37).y),(landmarks.part(39).x,landmarks.part(40).y),(0,0,255),2)
-        cv2.rectangle(frame,(landmarks.part(42).x,landmarks.part(43).y),(landmarks.part(45).x,landmarks.part(46).y),(0,0,255),2)
-        '''
-        for i in range(68):
-            
-            
-            cv2.circle(frame,(landmarks.part(i).x,landmarks.part(i).y),3,(0,0,255),-3)
-            #if i%2!=0:
-            #cv2.putText(frame,str(i),(landmarks.part(i).x,landmarks.part(i).y),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,145,0),2)
-        '''
-        smilepoints=[landmarks.part(48),landmarks.part(51),landmarks.part(54),landmarks.part(57)]
-        frame=obj.smile_aspect(frame,smilepoints)
-        #obj.pose(frame,landmarks)
-        x,y,w,h=bb(rects)
-        
-        cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-    cv2.imshow("frame",frame)
-    if cv2.waitKey(1) & 0XFF==ord("q"):
+if __name__=='__main__':
+    obj=scoring()
+    predictor=dlib.shape_predictor("land.dat")
+    detector=dlib.get_frontal_face_detector()
+    name='sad.jpg'
+    cap=cv2.VideoCapture(2)
+    while 1:
+        #ret,frame=cap.read()
+        frame=cv2.imread(name,1)
+        w,h,c=frame.shape
+        aspect=w/h
+        frame=cv2.resize(frame,(480,int(aspect*480)))
+        gray=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
+
+        rects=detector(gray,1)
+
+        for (i,rects) in enumerate(rects):
+            landmarks=predictor(gray,rects)
+            lp=[]
+            rp=[]
+            for i in range(6):
+                lp.append(landmarks.part(36+i))
+                rp.append(landmarks.part(42+i))
+
+            smilepoints=[landmarks.part(48),landmarks.part(51),landmarks.part(54),landmarks.part(57)]
+            obj.score(frame,[lp,rp],smilepoints)
+        cv2.imshow("Ds",frame)
+        cv2.imwrite("sad.jpg",frame)
+        cv2.waitKey(0)
         break
-cap.release()
-cv2.destroyAllWindows()

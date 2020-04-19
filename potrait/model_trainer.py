@@ -1,3 +1,4 @@
+import torch.nn.functional as F
 import os
 import cv2
 import sys
@@ -9,23 +10,50 @@ import numpy as np
 sys.path.append('')
 import torch.nn as nn
 import torch.optim as optim
-from modelArch.unet import Unet
-from modelArch.cnn import Cnn
 from torchsummary import summary
-from dataLoader.dataLoader_unet import load
-from dataLoader.dataloader_cnn import load_cnn
+#from dataLoader.dataloader_unet import load
+#from dataLoader.dataloader_cnn import load_cnn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import segmentation_models_pytorch as smp
 
 parser=argparse.ArgumentParser()
-parser.add_argument("--epochs",default=50)
-parser.add_argument("--batch_size",default=4)
-parser.add_argument("--lr",default=0.0001)
+parser.add_argument("--epochs",default=200)
+parser.add_argument("--batch_size",default=20)
+parser.add_argument("--lr",default=0.0002)
 parser.add_argument("--model",default="unet",help="unet/cnn")
 args=parser.parse_args()
 
-writer=SummaryWriter('runs/trial1')
 
+
+
+def dice_loss(pred, target, smooth = 1.):
+    pred = pred.contiguous()
+    target = target.contiguous()    
+
+    intersection = (pred * target).sum(dim=2).sum(dim=2)
+    
+    loss = (1 - ((2. * intersection + smooth) / (pred.sum(dim=2).sum(dim=2) + target.sum(dim=2).sum(dim=2) + smooth)))
+    
+    return loss.mean()
+
+def calc_loss(pred, target, bce_weight=0.5):
+    bce = F.binary_cross_entropy_with_logits(pred, target)
+        
+    pred = torch.sigmoid(pred)
+    dice = dice_loss(pred, target)
+    
+    loss = bce * bce_weight + dice * (1 - bce_weight)
+    
+    #metrics['bce'] += bce.data.cpu().numpy() * target.size(0)
+    #metrics['dice'] += dice.data.cpu().numpy() * target.size(0)
+    #metrics['loss'] += loss.data.cpu().numpy() * target.size(0)
+    
+    return loss
+
+
+writer=SummaryWriter('runs/trial1')
+num_iter=10
 net=None
 valid_loader=None
 train_loader=None
@@ -34,11 +62,13 @@ data=None
 model=None
 
 def weights_init(m):
+
     if isinstance(m,nn.Conv2d):
         torch.nn.init.xavier_uniform_(m.weight)
         torch.nn.init.zeros_(m.bias)
 
 def init(*args,**kwargs):
+
     """
     Initiates the training process
     keyword parameters:
@@ -46,35 +76,40 @@ def init(*args,**kwargs):
     resume:pass checkpoint number from where to resume training
     batch_size
     """
-    #resume=kwargs["resume"]
+
     global net,valid_loader,train_loader,device,data
     resume=None
     train_percent=kwargs["train_percent"]
     batch_size=kwargs["batch_size"]
     width=kwargs["width"]
     height=kwargs["width"]
-    #model=kwargs["model"]
     if(model=="unet"):
-        net=Unet(3,1)
+        net=smp.Unet('mobilenet_v2',encoder_weights='imagenet')
         data=load(width=width,height=height)
+
     elif(model=="cnn"):
         net=Cnn()
         data=load_cnn(width=width,height=height)
 
     if(resume is not None):
-        net.load_state_dict(torch.load("checkpoints/"+str(name)+".pth"))
-        print("Resuming training from "+str(name)+" checkpoint")
+        net.load_state_dict(torch.load("checkpoints/"+str(resume)+".pth"))
+        print("Resuming training from "+str(resume)+" checkpoint")
     else:
-        net.apply(weights_init)
+       # net.apply(weights_init)
+        pass
         
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print("using ",device)
+    
     #summary(net,input_size=(3,256,256))
     
     size=len(data)
+    print("Data Loaded")
     train_size=math.floor(train_percent*size)
     test_size=size-train_size
-    print("Data Loaded")
+    print("Total size of the dataset: ",size)
+    print("Train data size: ",train_size)
+    print("Test data size: ",test_size)
+    print("using {} for training",device)
     train,validation=torch.utils.data.random_split(data,[train_size,test_size])
     train_loader=DataLoader(train,batch_size=batch_size,shuffle=True,num_workers=4)
     valid_loader=DataLoader(validation,batch_size=batch_size,shuffle=True,num_workers=4)
@@ -101,12 +136,13 @@ def validation(**kwargs):
     with torch.no_grad():
         for no,data in enumerate(valid_loader):
             imgs,masks=data[0].to(device),data[1].to(device)
+            num_img=imgs[0]
             outputs=net(imgs)
-            v_loss=criterion(outputs,masks)
+            v_loss=calc_loss(outputs,masks)
             if(model=='unet'):
-                valid_loss+=torch.exp(v_loss).item()      
-            elif(model=='cnn'):
-                valid_loss+=v_loss.item()  
+                valid_loss+=(torch.exp(v_loss).item())*(args.batch_size/num_img)
+            #elif(model=='cnn'):
+             #   valid_loss+=v_loss.item()  
             p+=1
     
     return valid_loss/p
@@ -120,6 +156,7 @@ def training_loop(*args,**kwargs):
     lr:learning_rate
     
     """
+    print("Training Loop")
     global net,valid_loader,train_loader,device
     epochs=kwargs["epochs"]
     lr=kwargs["lr"]
@@ -130,42 +167,49 @@ def training_loop(*args,**kwargs):
         criterion=nn.BCEWithLogitsLoss()
     elif model=="cnn":
         criterion=nn.CrossEntropyLoss()
-    opt=optim.Adam(net.parameters(),lr=lr,weight_decay=1e-8)
+   # opt=torch.optim.SGD(net.parameters(),lr=lr,momentum=0.9)
+    opt=optim.Adam(net.parameters(),lr=lr,weight_decay=1e-5)
+    sch=torch.optim.lr_scheduler.ReduceLROnPlateau(opt)
+    #sch=torch.optim.lr_scheduler.StepLR(opt, step_size=50, gamma=0.1)
+    #sch=torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=0.01, steps_per_epoch=len(train_loader), epochs=50)   
     xx=[]
     yy=[]
     for epoch_num in range(1,epochs+1):
         running_loss=0.0
         for i,samples in enumerate(train_loader):
-
             imgs,masks=samples[0],samples[1]
+            num_imgs=imgs[0]
             imgs,masks=imgs.to(device),masks.to(device)
             opt.zero_grad()
             outputs=net(imgs)
-            loss=criterion(outputs,masks)
+            loss=calc_loss(outputs,masks) #criterion(outputs,masks)
             loss.backward()
             opt.step()
-            if(model=="unet"):
-                running_loss += torch.exp(loss).item()
-            elif(model=="cnn"):
-                running_loss+=loss.item()
-
-            if(i%20==19):
+            running_loss+=(torch.exp(loss).item())*(args.batch_size/num_imgs)
+            valid_loss=0
+            if(i%num_iter==0):
                 valid_loss=validation(valid_loader=valid_loader,criterion=criterion)
-                writer.add_scalars("first",{'train_loss':torch.tensor(running_loss/20),
+                writer.add_scalars("first",{'train_loss':torch.tensor(running_loss/num_iter),
                                             'validation_loss':torch.tensor(valid_loss)},epoch_num*len(train_loader)+i)
 
                 writer.close()
-                print("Epoch [%3d] iteration [%4d] loss:[%.10f]"%(epoch_num,i,running_loss/20),end="")
-                print(" validation_loss:[%.10f]"%(valid_loss))
+                print("Epoch [%3d] iteration [%4d] loss:[%.10f]"%(epoch_num,i,running_loss/num_iter),end="")
+                print(" validation_loss:[%.10f]"%(valid_loss),end="")
+                print("sch [%.10f] opt [%.10f]"%(0.0,opt.param_groups[0]['lr']))
                 running_loss=0.0
-        torch.save(net.state_dict(),"checkpoints/"+str(epoch_num)+".pth")
+
+            if i==160:
+                sch.step(valid_loss)
+
+        if epoch_num%2==0:
+
+            torch.save(net.state_dict(),"checkpoints/"+str(epoch_num)+".pth")
         
     
 if __name__=="__main__":
-    #global model
     model=args.model
-    init(batch_size=int(args.batch_size),train_percent=0.95,width=64,height=64)
-    training_loop(epochs=int(args.epochs),lr=1e-4)
+    init(batch_size=int(args.batch_size),train_percent=0.9,width=224,height=448)
+    training_loop(epochs=int(args.epochs),lr=float(args.lr))
 
 
     

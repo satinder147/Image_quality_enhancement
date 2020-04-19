@@ -1,9 +1,8 @@
 /data
 /potrait/models/
-*.jpg
 __pycache__/
 /bestshot/land.dat
+/bestshot/blur detection
+
 images/
-data.tar.gz
-50.pth
 
